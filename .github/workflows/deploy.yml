@@ -1,0 +1,50 @@
+# Deploy to the VPS on every push to main (or by hand from the Actions tab).
+# Runs scripts/deploy-vps.sh: rsync the source, rebuild the container, check the site.
+#
+# Repository secrets (Settings > Secrets and variables > Actions):
+#   VPS_SSH_KEY      private key of a deploy-only key pair whose public half is in the VPS authorized_keys
+#   VPS_HOST         user@host, e.g. root@72.61.224.97
+#   VPS_KNOWN_HOSTS  output of `ssh-keyscan 72.61.224.97`, so the host key is pinned
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time; a newer push waits rather than racing an unfinished build.
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: https://shodh.abhijitmone.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.VPS_HOST }}
+        run: bash scripts/deploy-vps.sh
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f ~/.ssh/id_ed25519
