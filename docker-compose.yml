@@ -1,0 +1,15 @@
+# Runs on the VPS behind Nginx (shodh.abhijitmone.com -> 127.0.0.1:3010).
+services:
+  research-agent:
+    build: .
+    container_name: research-agent
+    restart: unless-stopped
+    # Secrets live only on the server, in this file next to the compose file (chmod 600).
+    env_file: .env.production
+    environment:
+      DATA_DIR: /app/data
+    ports:
+      - "127.0.0.1:3010:3000"
+    volumes:
+      # SQLite files (threads, reports, agent checkpoints) survive rebuilds.
+      - ./data:/app/data

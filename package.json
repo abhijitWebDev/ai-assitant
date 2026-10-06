@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test:graph": "tsx scripts/test-graph.ts",
     "index:vectors": "tsx --env-file=.env scripts/index-vectors.ts",
+    "deploy": "bash scripts/deploy-vps.sh",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
