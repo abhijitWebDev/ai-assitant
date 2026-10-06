@@ -24,7 +24,7 @@ ssh "$HOST" "cd $DIR && docker compose --env-file .env.production up -d --build 
 
 echo "Checking $URL"
 for i in $(seq 1 15); do
-  code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/threads" || true)
+  code=$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/config" || true)
   if [ "$code" = "200" ]; then echo "Live: $URL"; exit 0; fi
   sleep 2
 done
