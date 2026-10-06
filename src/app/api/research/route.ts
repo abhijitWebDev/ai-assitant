@@ -1,5 +1,6 @@
 import { runResearch } from "@/lib/agent/run";
 import { guardThread, requireUser } from "@/lib/auth";
+import { claimRunSlot, takeToken, tooManyRequests } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -11,28 +12,61 @@ export const maxDuration = 300;
 export async function POST(request: Request) {
   const user = await requireUser();
   if (user instanceof Response) return user;
-  const body = (await request.json().catch(() => null)) as { question?: string; threadId?: string } | null;
+  const body = (await request.json().catch(() => null)) as {
+    question?: string;
+    threadId?: string;
+  } | null;
   const question = body?.question?.trim();
   const threadId = body?.threadId?.trim();
   if (!question || !threadId) {
-    return Response.json({ error: "Send a question and a threadId." }, { status: 400 });
+    return Response.json(
+      { error: "Send a question and a threadId." },
+      { status: 400 },
+    );
   }
   const denied = guardThread(threadId, user);
   if (denied) return denied;
 
+  // One run at a time per user, then the hourly and daily budgets.
+  const release = claimRunSlot(user);
+  if (!release)
+    return tooManyRequests(
+      "You already have a research run in progress. Wait for it to finish or stop it first.",
+    );
+  const limit = takeToken(user, "research");
+  if (!limit.ok) {
+    release();
+    return tooManyRequests(limit.message, limit.retryAfterSec);
+  }
+
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
-      const send = (data: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+      const send = (data: unknown) =>
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       try {
-        for await (const event of runResearch({ question, threadId, userId: user, signal: request.signal })) send(event);
+        for await (const event of runResearch({
+          question,
+          threadId,
+          userId: user,
+          signal: request.signal,
+        }))
+          send(event);
       } catch (err) {
         if (!request.signal.aborted) {
           console.error("[research] run failed", err);
-          send({ type: "error", message: err instanceof Error ? err.message : String(err) });
+          send({
+            type: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
         }
       } finally {
-        controller.close();
+        release();
+        try {
+          controller.close();
+        } catch {
+          // Already closed because the browser went away.
+        }
       }
     },
   });

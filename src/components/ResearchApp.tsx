@@ -201,6 +201,8 @@ export default function ResearchApp() {
   const [draftNo, setDraftNo] = useState(0);
   const [blocked, setBlocked] = useState<GuardrailResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** A rate-limit notice: not an error, just "not right now". */
+  const [limited, setLimited] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -292,6 +294,7 @@ export default function ResearchApp() {
   };
 
   function resetRun() {
+    setLimited(null);
     setStations(emptyStations());
     setLog([]);
     setDraft("");
@@ -327,6 +330,15 @@ export default function ResearchApp() {
         body: JSON.stringify({ question: text, threadId }),
         signal: controller.signal,
       });
+      if (res.status === 429) {
+        setLimited(
+          (await res.json().catch(() => ({}))).error ??
+            "You've hit the research limit for now. Try again later.",
+        );
+        setStations(emptyStations());
+        setStatus("Waiting for a question.");
+        return;
+      }
       if (!res.ok || !res.body)
         throw new Error(
           (await res.json().catch(() => ({}))).error ?? `HTTP ${res.status}`,
@@ -667,6 +679,14 @@ export default function ResearchApp() {
       {uploadError && (
         <p className="px-3 pt-2 text-xs text-red-700 dark:text-red-400">
           {uploadError}
+        </p>
+      )}
+      {limited && (
+        <p
+          role="status"
+          className="mx-3 mt-2 rounded-lg border border-yellow-600/30 px-3 py-2 text-sm text-yellow-800 dark:border-yellow-400/30 dark:text-yellow-300"
+        >
+          {limited}
         </p>
       )}
     </form>

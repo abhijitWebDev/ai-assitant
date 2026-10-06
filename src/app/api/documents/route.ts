@@ -1,4 +1,5 @@
 import { guardThread, requireUser } from "@/lib/auth";
+import { takeToken, tooManyRequests } from "@/lib/ratelimit";
 import { ensureThread, listDocuments, saveDocument } from "@/lib/db";
 import { chunkText, extractText, indexDocument } from "@/lib/retrieval/docs";
 
@@ -14,24 +15,45 @@ export async function POST(request: Request) {
   const threadId = String(form.get("threadId") ?? "").trim();
   const file = form.get("file");
   if (!threadId || !(file instanceof File)) {
-    return Response.json({ error: "Send a threadId and a file." }, { status: 400 });
+    return Response.json(
+      { error: "Send a threadId and a file." },
+      { status: 400 },
+    );
   }
   const denied = guardThread(threadId, user);
   if (denied) return denied;
   if (file.size > MAX_BYTES) {
-    return Response.json({ error: "Files must be 15 MB or smaller." }, { status: 413 });
+    return Response.json(
+      { error: "Files must be 15 MB or smaller." },
+      { status: 413 },
+    );
   }
+  // Counted after validation, so a rejected file does not use up the budget.
+  const limit = takeToken(user, "upload");
+  if (!limit.ok) return tooManyRequests(limit.message, limit.retryAfterSec);
   try {
-    const text = await extractText({ name: file.name, type: file.type, buffer: Buffer.from(await file.arrayBuffer()) });
+    const text = await extractText({
+      name: file.name,
+      type: file.type,
+      buffer: Buffer.from(await file.arrayBuffer()),
+    });
     if (!text.trim()) {
       return Response.json(
-        { error: `No text found in ${file.name}. Scanned PDFs need OCR before upload.` },
+        {
+          error: `No text found in ${file.name}. Scanned PDFs need OCR before upload.`,
+        },
         { status: 422 },
       );
     }
     ensureThread(threadId, `Documents: ${file.name}`, user);
     const chunks = chunkText(text);
-    const doc = saveDocument(threadId, file.name, file.type || "application/octet-stream", text, chunks);
+    const doc = saveDocument(
+      threadId,
+      file.name,
+      file.type || "application/octet-stream",
+      text,
+      chunks,
+    );
     // The document is saved either way; without vectors it is still found by keyword search.
     let warning: string | undefined;
     try {
@@ -40,8 +62,16 @@ export async function POST(request: Request) {
       console.warn("[lancedb] indexing failed for", doc.name, err);
       warning = `${file.name} was added, but semantic indexing failed, so only keyword search will find it.`;
     }
-    return Response.json({ document: doc, chunks: chunks.length, documents: listDocuments(threadId), warning });
+    return Response.json({
+      document: doc,
+      chunks: chunks.length,
+      documents: listDocuments(threadId),
+      warning,
+    });
   } catch (err) {
-    return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 400 });
+    return Response.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      { status: 400 },
+    );
   }
 }

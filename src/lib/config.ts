@@ -67,6 +67,12 @@ export const config = {
   storage: {
     dataDir: process.env.DATA_DIR || "./data",
   },
+  rateLimit: {
+    /** Per signed-in user; 0 switches a limit off. One run at a time is always enforced. */
+    researchPerHour: num("RATE_RESEARCH_PER_HOUR", 10),
+    researchPerDay: num("RATE_RESEARCH_PER_DAY", 40),
+    uploadsPerHour: num("RATE_UPLOADS_PER_HOUR", 30),
+  },
   vector: {
     /** Self-hosted LanceDB service. Leave LANCEDB_URI unset to use BM25 keyword search only. */
     uri: process.env.LANCEDB_URI || "",
