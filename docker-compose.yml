@@ -1,7 +1,15 @@
 # Runs on the VPS behind Nginx (shodh.abhijitmone.com -> 127.0.0.1:3010).
 services:
   research-agent:
-    build: .
+    build:
+      context: .
+      args:
+        # Read from .env.production by `docker compose --env-file .env.production` (see deploy script).
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+        NEXT_PUBLIC_CLERK_SIGN_IN_URL: ${NEXT_PUBLIC_CLERK_SIGN_IN_URL:-}
+        NEXT_PUBLIC_CLERK_SIGN_UP_URL: ${NEXT_PUBLIC_CLERK_SIGN_UP_URL:-}
+        NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL: ${NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL:-}
+        NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL: ${NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL:-}
     container_name: research-agent
     restart: unless-stopped
     # Secrets live only on the server, in this file next to the compose file (chmod 600).

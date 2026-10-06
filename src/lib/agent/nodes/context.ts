@@ -15,9 +15,11 @@ import type { EvidenceChunk } from "../types";
  */
 export async function contextManager(state: ResearchStateType, cfg: LangGraphRunnableConfig): Promise<ResearchUpdate> {
   const threadId = String(cfg.configurable?.thread_id ?? "");
+  const userId = String(cfg.configurable?.user_id ?? "");
   const sameThread = threadId ? listReports(threadId).slice(0, 3) : [];
 
-  const others = allReports().filter((r) => r.thread_id !== threadId);
+  // Only this user's own reports count as memory.
+  const others = userId ? allReports(userId).filter((r) => r.thread_id !== threadId) : [];
   const keyword = bm25Rank(
     state.question,
     others.map((r) => `${r.question}\n${r.summary}`),
@@ -30,14 +32,15 @@ export async function contextManager(state: ResearchStateType, cfg: LangGraphRun
   let semantic: string[] = [];
   if (vectorEnabled() && others.length) {
     try {
-      semantic = (await searchReports(state.question, 5, threadId || undefined)).map((h) => h.id);
+      // Vector rows are shared across users, so over-fetch; reportsByIds keeps only this user's.
+      semantic = (await searchReports(state.question, 20, threadId || undefined)).map((h) => h.id);
       recall = "hybrid";
     } catch (err) {
       recall = `keyword (vector search failed: ${err instanceof Error ? err.message : String(err)})`;
     }
   }
   // reportsByIds drops ids that no longer exist in SQLite (deleted threads).
-  const ranked = reportsByIds(fuse([keyword, semantic]))
+  const ranked = reportsByIds(fuse([keyword, semantic]), userId)
     .filter((r) => r.thread_id !== threadId)
     .slice(0, 2);
 

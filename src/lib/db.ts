@@ -25,6 +25,7 @@ export function getDb(): Database.Database {
   db.exec(`
     CREATE TABLE IF NOT EXISTS threads (
       id TEXT PRIMARY KEY,
+      user_id TEXT,
       title TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -57,6 +58,10 @@ export function getDb(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_chunks_thread ON doc_chunks(thread_id);
   `);
+  // Databases created before sign-in have no owner column; threads from then stay ownerless (hidden).
+  const cols = db.prepare("PRAGMA table_info(threads)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "user_id")) db.exec("ALTER TABLE threads ADD COLUMN user_id TEXT");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_threads_user ON threads(user_id, updated_at)");
   return db;
 }
 
@@ -64,32 +69,40 @@ const now = () => new Date().toISOString();
 
 /* ---------------- threads ---------------- */
 
-export type ThreadRow = { id: string; title: string; created_at: string; updated_at: string };
+export type ThreadRow = { id: string; user_id: string | null; title: string; created_at: string; updated_at: string };
 
-export function ensureThread(id: string, title: string) {
-  const d = getDb();
-  const existing = d.prepare("SELECT id FROM threads WHERE id = ?").get(id);
-  if (existing) {
-    d.prepare("UPDATE threads SET updated_at = ? WHERE id = ?").run(now(), id);
-  } else {
-    d.prepare("INSERT INTO threads (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)").run(
-      id,
-      title.slice(0, 120),
-      now(),
-      now(),
-    );
-  }
+/**
+ * Whether `userId` may use this thread id: yes if they own it, or if it does not exist yet
+ * (thread ids are minted by the browser, so a new id is how a thread starts).
+ * Ownerless threads from before sign-in, and other people's threads, are refused.
+ */
+export function canUseThread(id: string, userId: string): boolean {
+  const row = getDb().prepare("SELECT user_id FROM threads WHERE id = ?").get(id) as { user_id: string | null } | undefined;
+  return !row || row.user_id === userId;
 }
 
-export function listThreads(): (ThreadRow & { report_count: number; doc_count: number })[] {
+/**
+ * Create the thread for its owner, or touch it if they already own it.
+ * Someone else's thread is left alone (callers check canUseThread first anyway).
+ */
+export function ensureThread(id: string, title: string, userId: string) {
+  getDb()
+    .prepare(
+      `INSERT INTO threads (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at WHERE threads.user_id = excluded.user_id`,
+    )
+    .run(id, userId, title.slice(0, 120), now(), now());
+}
+
+export function listThreads(userId: string): (ThreadRow & { report_count: number; doc_count: number })[] {
   return getDb()
     .prepare(
       `SELECT t.*,
         (SELECT COUNT(*) FROM reports r WHERE r.thread_id = t.id) AS report_count,
         (SELECT COUNT(*) FROM documents d WHERE d.thread_id = t.id) AS doc_count
-       FROM threads t ORDER BY updated_at DESC LIMIT 100`,
+       FROM threads t WHERE t.user_id = ? ORDER BY updated_at DESC LIMIT 100`,
     )
-    .all() as (ThreadRow & { report_count: number; doc_count: number })[];
+    .all(userId) as (ThreadRow & { report_count: number; doc_count: number })[];
 }
 
 export function deleteThread(id: string) {
@@ -137,8 +150,14 @@ export function listReports(threadId: string): ReportRow[] {
     .all(threadId) as ReportRow[];
 }
 
-export function allReports(limit = 200): ReportRow[] {
-  return getDb().prepare("SELECT * FROM reports ORDER BY created_at DESC LIMIT ?").all(limit) as ReportRow[];
+/** This user's reports across all their threads (long-term memory never crosses users). */
+export function allReports(userId: string, limit = 200): ReportRow[] {
+  return getDb()
+    .prepare(
+      `SELECT r.* FROM reports r JOIN threads t ON t.id = r.thread_id
+       WHERE t.user_id = ? ORDER BY r.created_at DESC LIMIT ?`,
+    )
+    .all(userId, limit) as ReportRow[];
 }
 
 /* ---------------- private documents ---------------- */
@@ -171,6 +190,12 @@ export function listDocuments(threadId: string): DocumentRow[] {
     .all(threadId) as DocumentRow[];
 }
 
+/** The thread a document belongs to, or undefined if there is no such document. */
+export function documentThread(id: string): string | undefined {
+  const row = getDb().prepare("SELECT thread_id FROM documents WHERE id = ?").get(id) as { thread_id: string } | undefined;
+  return row?.thread_id;
+}
+
 export function deleteDocument(id: string) {
   const d = getDb();
   d.prepare("DELETE FROM doc_chunks WHERE document_id = ?").run(id);
@@ -192,11 +217,15 @@ export function documentChunks(documentId: string): { id: string; position: numb
     .all(documentId) as { id: string; position: number; content: string }[];
 }
 
-export function reportsByIds(ids: string[]): ReportRow[] {
+/** Reports by id, limited to this user's threads. */
+export function reportsByIds(ids: string[], userId: string): ReportRow[] {
   if (!ids.length) return [];
   const rows = getDb()
-    .prepare(`SELECT * FROM reports WHERE id IN (${ids.map(() => "?").join(", ")})`)
-    .all(...ids) as ReportRow[];
+    .prepare(
+      `SELECT r.* FROM reports r JOIN threads t ON t.id = r.thread_id
+       WHERE t.user_id = ? AND r.id IN (${ids.map(() => "?").join(", ")})`,
+    )
+    .all(userId, ...ids) as ReportRow[];
   // Keep the caller's order (it is a ranking).
   const byId = new Map(rows.map((r) => [r.id, r]));
   return ids.map((id) => byId.get(id)).filter((r): r is ReportRow => Boolean(r));

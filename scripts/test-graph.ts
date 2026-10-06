@@ -103,7 +103,7 @@ async function main() {
   let done: Extract<Awaited<ReturnType<typeof collect>>[number], { type: "done" }> | undefined;
   async function collect(question: string) {
     const out = [];
-    for await (const ev of runResearch({ question, threadId })) out.push(ev);
+    for await (const ev of runResearch({ question, threadId, userId: "test-user" })) out.push(ev);
     return out;
   }
   const events = await collect("What are the key differences between RAG and fine-tuning for adapting LLMs?");

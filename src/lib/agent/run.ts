@@ -52,12 +52,14 @@ function extractSummary(report: string): string {
 export async function* runResearch(opts: {
   question: string;
   threadId: string;
+  /** Clerk user id; scopes memory recall to this user's own reports. */
+  userId: string;
   signal?: AbortSignal;
 }): AsyncGenerator<RunEvent> {
   const started = Date.now();
   const graph = getGraph();
-  const cfg = { configurable: { thread_id: opts.threadId } };
-  ensureThread(opts.threadId, opts.question);
+  const cfg = { configurable: { thread_id: opts.threadId, user_id: opts.userId } };
+  ensureThread(opts.threadId, opts.question, opts.userId);
 
   yield { type: "start", threadId: opts.threadId, question: opts.question };
 

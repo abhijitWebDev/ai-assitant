@@ -1,3 +1,4 @@
+import { guardThread, requireUser } from "@/lib/auth";
 import { ensureThread, listDocuments, saveDocument } from "@/lib/db";
 import { chunkText, extractText, indexDocument } from "@/lib/retrieval/docs";
 
@@ -7,12 +8,16 @@ const MAX_BYTES = 15 * 1024 * 1024;
 
 /** POST multipart { threadId, file } — parse, chunk and index a private document for this thread. */
 export async function POST(request: Request) {
+  const user = await requireUser();
+  if (user instanceof Response) return user;
   const form = await request.formData();
   const threadId = String(form.get("threadId") ?? "").trim();
   const file = form.get("file");
   if (!threadId || !(file instanceof File)) {
     return Response.json({ error: "Send a threadId and a file." }, { status: 400 });
   }
+  const denied = guardThread(threadId, user);
+  if (denied) return denied;
   if (file.size > MAX_BYTES) {
     return Response.json({ error: "Files must be 15 MB or smaller." }, { status: 413 });
   }
@@ -24,7 +29,7 @@ export async function POST(request: Request) {
         { status: 422 },
       );
     }
-    ensureThread(threadId, `Documents: ${file.name}`);
+    ensureThread(threadId, `Documents: ${file.name}`, user);
     const chunks = chunkText(text);
     const doc = saveDocument(threadId, file.name, file.type || "application/octet-stream", text, chunks);
     // The document is saved either way; without vectors it is still found by keyword search.

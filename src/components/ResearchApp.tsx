@@ -15,6 +15,13 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import {
+  SignInButton,
+  SignUpButton,
+  UserButton,
+  useAuth,
+  useClerk,
+} from "@clerk/nextjs";
 import { MotionConfig, motion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RunEvent } from "@/lib/agent/run";
@@ -203,13 +210,17 @@ export default function ResearchApp() {
   const maxPasses = (cfg?.config.limits.maxResearchIterations ?? 2) + 1;
   const maxDrafts = (cfg?.config.limits.maxRevisions ?? 2) + 1;
 
+  const { isLoaded, isSignedIn, userId } = useAuth();
+  const clerk = useClerk();
+
   const loadThreads = useCallback(async () => {
-    const r = await fetch("/api/threads").then((r) => r.json());
-    setThreads(r.threads);
+    const res = await fetch("/api/threads");
+    setThreads(res.ok ? (await res.json()).threads : []);
   }, []);
 
   const loadThread = useCallback(async (id: string) => {
-    const r = await fetch(`/api/threads/${id}`).then((r) => r.json());
+    const res = await fetch(`/api/threads/${id}`);
+    const r = res.ok ? await res.json() : { reports: [], documents: [] };
     setReports(r.reports);
     setDocs(r.documents);
     return r.reports as SavedReport[];
@@ -220,11 +231,37 @@ export default function ResearchApp() {
       .then((r) => r.json())
       .then(setCfg)
       .catch(() => null);
+  }, []);
+
+  // When someone signs in, out, or switches account, drop the previous person's threads
+  // (during render, so their data never flashes). The typed question is kept.
+  const [owner, setOwner] = useState<string | null | undefined>(undefined);
+  if (isLoaded && owner !== (userId ?? null)) {
+    setOwner(userId ?? null);
+    if (owner !== undefined) {
+      setThreads([]);
+      setReports([]);
+      setDocs([]);
+      setSelected(null);
+      setLastRunReport(null);
+      setThreadId(crypto.randomUUID());
+    }
+  }
+
+  useEffect(() => {
+    if (!userId) return;
     fetch("/api/threads")
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : { threads: [] }))
       .then((r) => setThreads(r.threads))
       .catch(() => null);
-  }, []);
+  }, [userId]);
+
+  /** Signed-out visitors get the sign-in modal instead; returns whether to carry on. */
+  const requireSignIn = () => {
+    if (isSignedIn) return true;
+    if (isLoaded) clerk.openSignIn();
+    return false;
+  };
 
   // The header is transparent at the top and blurs once the page scrolls.
   useEffect(() => {
@@ -268,6 +305,7 @@ export default function ResearchApp() {
   const start = async (q = question) => {
     const text = q.trim();
     if (!text || running) return;
+    if (!requireSignIn()) return;
     resetRun();
     setQuestion(text);
     setSelected(null);
@@ -373,6 +411,10 @@ export default function ResearchApp() {
 
   const upload = async (files: FileList | null) => {
     if (!files?.length) return;
+    if (!requireSignIn()) {
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
     setUploading(true);
     setUploadError(null);
     for (const file of Array.from(files)) {
@@ -463,6 +505,29 @@ export default function ResearchApp() {
             onClick={() => setDrawer(true)}
             aria-label="Threads and reports"
           />
+          {isLoaded &&
+            (isSignedIn ? (
+              <span className="ml-2 inline-flex size-9 items-center justify-center">
+                <UserButton />
+              </span>
+            ) : (
+              <span className="ml-2 inline-flex items-center gap-1">
+                <SignUpButton mode="modal">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="hidden sm:inline-flex"
+                  >
+                    Sign up
+                  </Button>
+                </SignUpButton>
+                <SignInButton mode="modal">
+                  <Button variant="outline" size="sm" iconRight={null}>
+                    Sign in
+                  </Button>
+                </SignInButton>
+              </span>
+            ))}
         </div>
       </nav>
     </header>
@@ -542,6 +607,13 @@ export default function ResearchApp() {
 
       <div className="flex flex-wrap items-center gap-2 border-t border-card-edge px-1 pt-2">
         <label
+          onClick={(e) => {
+            // Ask for sign-in before the file picker opens, not after a file is chosen.
+            if (!isSignedIn) {
+              e.preventDefault();
+              if (isLoaded) clerk.openSignIn();
+            }
+          }}
           className={cn(
             "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground",
             (uploading || running) && "pointer-events-none opacity-50",
@@ -581,7 +653,12 @@ export default function ResearchApp() {
               Stop research
             </Button>
           ) : (
-            <Button type="submit" variant="solid" disabled={!question.trim()}>
+            <Button
+              type="submit"
+              variant="solid"
+              // Clerk loads in a second or two; until then a click could not open sign-in.
+              disabled={!question.trim() || !isLoaded}
+            >
               Start research
             </Button>
           )}
@@ -1018,7 +1095,25 @@ export default function ResearchApp() {
           title="Your research"
           description="Threads keep their reports and documents together."
         >
-          {drawerBody}
+          {isSignedIn ? (
+            drawerBody
+          ) : (
+            <div className="flex flex-col gap-4">
+              <p className="text-sm text-muted-foreground">
+                Sign in to keep your threads, reports and documents,{" "}
+                <span className="highlight">private to you</span>.
+              </p>
+              <SignInButton mode="modal">
+                <Button
+                  variant="soft"
+                  className="w-full"
+                  onClick={() => setDrawer(false)}
+                >
+                  Sign in
+                </Button>
+              </SignInButton>
+            </div>
+          )}
         </DrawerContent>
       </Drawer>
 

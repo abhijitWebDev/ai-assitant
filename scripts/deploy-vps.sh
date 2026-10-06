@@ -20,7 +20,7 @@ rsync -az --delete \
   ./ "$HOST:$DIR/"
 
 echo "Building and restarting (a few minutes on 1 vCPU)"
-ssh "$HOST" "cd $DIR && docker compose up -d --build && docker image prune -f >/dev/null"
+ssh "$HOST" "cd $DIR && docker compose --env-file .env.production up -d --build && docker image prune -f >/dev/null"
 
 echo "Checking $URL"
 for i in $(seq 1 15); do

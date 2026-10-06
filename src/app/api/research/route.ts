@@ -1,4 +1,5 @@
 import { runResearch } from "@/lib/agent/run";
+import { guardThread, requireUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -8,19 +9,23 @@ export const maxDuration = 300;
  * Closing the connection aborts the graph run.
  */
 export async function POST(request: Request) {
+  const user = await requireUser();
+  if (user instanceof Response) return user;
   const body = (await request.json().catch(() => null)) as { question?: string; threadId?: string } | null;
   const question = body?.question?.trim();
   const threadId = body?.threadId?.trim();
   if (!question || !threadId) {
     return Response.json({ error: "Send a question and a threadId." }, { status: 400 });
   }
+  const denied = guardThread(threadId, user);
+  if (denied) return denied;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
       const send = (data: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       try {
-        for await (const event of runResearch({ question, threadId, signal: request.signal })) send(event);
+        for await (const event of runResearch({ question, threadId, userId: user, signal: request.signal })) send(event);
       } catch (err) {
         if (!request.signal.aborted) {
           console.error("[research] run failed", err);
