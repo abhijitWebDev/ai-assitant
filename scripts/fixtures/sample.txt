@@ -1,0 +1,9 @@
+Internal memo: adapting language models to our support knowledge base
+
+Retrieval-augmented generation (RAG) keeps the model frozen and retrieves relevant passages from a document index at query time. Updating knowledge means re-indexing documents, which takes minutes and costs very little.
+
+Fine-tuning changes model weights by training on curated examples. It is best for teaching a consistent style, format or tone. Each refresh of knowledge requires a new training run, and our last fine-tuning run on a 7B model took six hours of GPU time.
+
+Cost comparison from our pilot: the RAG pipeline cost roughly the price of the vector database plus slightly longer prompts per request. Fine-tuning had an upfront training cost and a separate hosting cost for the custom model.
+
+Limitations: RAG quality depends on retrieval quality and chunking. Fine-tuning can cause the model to forget general knowledge and does not give citations.
