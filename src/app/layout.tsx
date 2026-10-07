@@ -8,6 +8,18 @@ export const metadata: Metadata = {
   title: "Research Desk",
   description:
     "A LangGraph multi-agent system that plans, searches, checks its own coverage and writes cited reports.",
+  // Icon set in public/ (src/app/favicon.ico would override /favicon.ico, so there is none).
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon.svg", type: "image/svg+xml" },
+      { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/favicon-48x48.png", sizes: "48x48", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
+  },
+  manifest: "/site.webmanifest",
 };
 
 /**
