@@ -1,4 +1,5 @@
-import { callText } from "../../llm";
+import { callText, shrinkToFit } from "../../llm";
+import { truncate } from "../../text";
 import { log, type ResearchStateType, type ResearchUpdate } from "../state";
 import type { EvidenceChunk } from "../types";
 
@@ -8,9 +9,10 @@ import type { EvidenceChunk } from "../types";
  * Citation Checker, so the model can't invent a URL.
  */
 
-export function numberedEvidence(evidence: EvidenceChunk[]): string {
+/** `maxChars` caps each chunk's text, to fit a smaller model's token limit. */
+export function numberedEvidence(evidence: EvidenceChunk[], maxChars = Infinity): string {
   return evidence
-    .map((e, i) => `[${i + 1}] ${e.title} — ${e.url}\n(sub-question: ${e.subQuestion})\n${e.content}`)
+    .map((e, i) => `[${i + 1}] ${e.title} — ${e.url}\n(sub-question: ${e.subQuestion})\n${truncate(e.content, maxChars)}`)
     .join("\n\n");
 }
 
@@ -40,7 +42,9 @@ export async function synthesis(state: ResearchStateType): Promise<ResearchUpdat
   const revising = state.critique?.verdict === "revision_needed" && Boolean(state.draftReport);
   const evidence = state.evidenceStore;
 
-  const user = `Research question: ${state.question}
+  // `cap` trims each evidence chunk and `withDraft` drops the previous draft; both are only
+  // used to fit the fallback model's per-minute token limit.
+  const build = (cap: number, withDraft = true) => `Research question: ${state.question}
 
 Brief:
 ${state.researchBrief}
@@ -49,15 +53,29 @@ Sub-questions to address:${state.researchQuestions.map((q) => `\n- ${q}`).join("
 ${state.limitations.length ? `\nKnown limitations of this research (mention briefly where relevant):\n${state.limitations.map((l) => `- ${l}`).join("\n")}\n` : ""}
 Evidence (${evidence.length} chunks):
 
-${evidence.length ? numberedEvidence(evidence) : "(No evidence was retrieved. Write a short report that states this clearly and makes no factual claims.)"}
+${evidence.length ? numberedEvidence(evidence, cap) : "(No evidence was retrieved. Write a short report that states this clearly and makes no factual claims.)"}
 ${
   revising
-    ? `\n---\nYour previous draft was reviewed and needs revision.\n\nReviewer's brief:\n${state.critique!.brief}\n\nPrevious draft:\n${state.draftReport}\n\nRewrite the full report, fixing every issue in the brief.`
+    ? withDraft
+      ? `\n---\nYour previous draft was reviewed and needs revision.\n\nReviewer's brief:\n${state.critique!.brief}\n\nPrevious draft:\n${state.draftReport}\n\nRewrite the full report, fixing every issue in the brief.`
+      : `\n---\nA previous draft was reviewed and needs revision.\n\nReviewer's brief:\n${state.critique!.brief}\n\nWrite the full report, avoiding every issue in the brief.`
     : ""
 }`;
+  const user = build(Infinity);
+  const fit = (maxChars: number) => {
+    const longest = Math.max(0, ...evidence.map((e) => e.content.length));
+    const full = shrinkToFit((cap) => build(cap), maxChars, longest);
+    return full.length <= maxChars || !revising ? full : shrinkToFit((cap) => build(cap, false), maxChars, longest);
+  };
 
   try {
-    let draft = await callText({ tier: "smart", name: revising ? "synthesis_revision" : "synthesis", system: SYSTEM, user });
+    let draft = await callText({
+      tier: "smart",
+      name: revising ? "synthesis_revision" : "synthesis",
+      system: SYSTEM,
+      user,
+      fit,
+    });
     draft = draft
       .replace(/^```(?:markdown)?\s*/i, "")
       .replace(/```\s*$/, "")

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { config } from "../../config";
-import { callStructured, mapLimit } from "../../llm";
+import { callStructured, mapLimit, shrinkToFit } from "../../llm";
 import { truncate } from "../../text";
 import { log, type ResearchStateType, type ResearchUpdate } from "../state";
 import type { EvidenceChunk, RawResult, ToolError } from "../types";
@@ -39,9 +39,9 @@ export async function evidenceExtractor(state: ResearchStateType): Promise<Resea
   const retrievedAt = new Date().toISOString();
 
   const perGroup = await mapLimit([...groups.entries()], config.limits.llmConcurrency, async ([subQuestion, results]) => {
-    const listing = results
-      .map((r, i) => `[${i + 1}] ${r.title} (${r.sourceType}/${r.provider})\n${truncate(r.content, 1500)}`)
-      .join("\n\n");
+    const listing = (cap: number) =>
+      results.map((r, i) => `[${i + 1}] ${r.title} (${r.sourceType}/${r.provider})\n${truncate(r.content, cap)}`).join("\n\n");
+    const prompt = (cap: number) => `Sub-question: ${subQuestion}\n\nResults:\n${listing(cap)}`;
     try {
       const out = await callStructured({
         tier: "fast",
@@ -49,7 +49,9 @@ export async function evidenceExtractor(state: ResearchStateType): Promise<Resea
         name: "evidence_extractor",
         system:
           "You extract evidence for a research sub-question. For each numbered result, pull out only the facts relevant to the sub-question and score relevance strictly. Never add facts that are not in the result.",
-        user: `Sub-question: ${subQuestion}\n\nResults:\n${listing}`,
+        user: prompt(1500),
+        // The fallback model has a small per-minute token limit: read less of each result.
+        fit: (maxChars) => shrinkToFit(prompt, maxChars, 1500, 200),
       });
       return out.items
         .filter((it) => it.index >= 1 && it.index <= results.length && it.passage.trim())

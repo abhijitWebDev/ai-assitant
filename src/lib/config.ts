@@ -24,10 +24,12 @@ const DEFAULT_MODELS: Record<LlmProvider, { smart: string; fast: string }> = {
   openai: { smart: "gpt-4.1", fast: "gpt-4.1-mini" },
   anthropic: { smart: "claude-sonnet-4-5", fast: "claude-haiku-4-5" },
   google: { smart: "gemini-2.5-pro", fast: "gemini-2.5-flash" },
-  groq: { smart: "llama-3.3-70b-versatile", fast: "llama-3.1-8b-instant" },
+  // gpt-oss models are on Groq's free tier and support strict JSON-schema output.
+  groq: { smart: "openai/gpt-oss-120b", fast: "openai/gpt-oss-20b" },
 };
 
 const provider = (process.env.LLM_PROVIDER?.toLowerCase() ?? "openai") as LlmProvider;
+const fallbackProvider = (process.env.LLM_FALLBACK_PROVIDER?.toLowerCase() || "") as LlmProvider | "";
 
 export const config = {
   llm: {
@@ -37,6 +39,34 @@ export const config = {
     /** Cheap, fast model: Guardrail, Query Generator, Evidence scoring. */
     fastModel: process.env.FAST_MODEL || DEFAULT_MODELS[provider]?.fast,
     temperature: num("LLM_TEMPERATURE", 0.2),
+    /**
+     * Retries on the main provider. 6 is LangChain's default; with a fallback set, 2 hands
+     * a failing call over sooner instead of backing off for a minute.
+     */
+    maxRetries: num("LLM_MAX_RETRIES", fallbackProvider ? 2 : 6),
+    /**
+     * Used only when a call to the main provider fails (rate limit, outage, timeout).
+     * Leave LLM_FALLBACK_PROVIDER unset to switch it off.
+     */
+    fallback: fallbackProvider
+      ? {
+          provider: fallbackProvider,
+          smartModel: process.env.FALLBACK_SMART_MODEL || DEFAULT_MODELS[fallbackProvider]?.smart,
+          fastModel: process.env.FALLBACK_FAST_MODEL || DEFAULT_MODELS[fallbackProvider]?.fast,
+          /**
+           * Per-model limits this app keeps under; set them to your account's limits
+           * (Groq: console.groq.com/settings/limits; free tier gpt-oss is 8K TPM, 30 RPM).
+           * Calls wait for room in the minute window; prompts too big are trimmed or skipped.
+           */
+          tokensPerMinute: num("FALLBACK_TPM", 8000),
+          requestsPerMinute: num("FALLBACK_RPM", 30),
+          /**
+           * Longest a call waits for room in the minute window. Just over a minute, because a
+           * trimmed report prompt can fill nearly the whole TPM and must outwait earlier calls.
+           */
+          maxWaitMs: num("FALLBACK_MAX_WAIT_MS", 65000),
+        }
+      : null,
   },
   search: {
     /** Tried in order; providers without an API key are skipped. DuckDuckGo needs no key. */
@@ -102,6 +132,9 @@ export function describeConfig() {
     provider: config.llm.provider,
     smartModel: config.llm.smartModel,
     fastModel: config.llm.fastModel,
+    fallback: config.llm.fallback
+      ? `${config.llm.fallback.provider} · ${config.llm.fallback.smartModel}/${config.llm.fallback.fastModel}`
+      : null,
     searchProviders: config.search.providers,
     apiSources: config.apis.sources,
     mcp: Boolean(config.apis.mcpServerUrl),
