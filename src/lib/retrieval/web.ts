@@ -1,4 +1,5 @@
 import { tavily } from "@tavily/core";
+import { cachedSearch, normalizeQuery } from "../cache";
 import { config } from "../config";
 
 export interface WebHit {
@@ -116,10 +117,14 @@ const REGISTRY: Record<string, SearchProvider> = {
 /**
  * Fallback chain (guide §9.4): try providers in order; move on when one throws
  * or returns nothing. Returns which provider answered plus every failure seen.
+ * Each provider's results are cached per query, so a repeat search spends no credits.
  */
-export async function webSearch(
-  query: string,
-): Promise<{ provider: string | null; hits: WebHit[]; failures: { provider: string; error: string }[] }> {
+export async function webSearch(query: string): Promise<{
+  provider: string | null;
+  hits: WebHit[];
+  cached: boolean;
+  failures: { provider: string; error: string }[];
+}> {
   const failures: { provider: string; error: string }[] = [];
   for (const name of config.search.providers) {
     const p = REGISTRY[name];
@@ -127,10 +132,11 @@ export async function webSearch(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), config.search.timeoutMs);
     try {
-      const hits = (await p.search(query, config.search.resultsPerQuery, controller.signal)).filter(
-        (h) => h.url && h.content,
+      const n = config.search.resultsPerQuery;
+      const { value: hits, cached } = await cachedSearch("web", [p.name, n, normalizeQuery(query)], async () =>
+        (await p.search(query, n, controller.signal)).filter((h) => h.url && h.content),
       );
-      if (hits.length) return { provider: p.name, hits, failures };
+      if (hits.length) return { provider: p.name, hits, cached, failures };
       failures.push({ provider: p.name, error: "no results" });
     } catch (err) {
       failures.push({ provider: p.name, error: err instanceof Error ? err.message : String(err) });
@@ -138,5 +144,5 @@ export async function webSearch(
       clearTimeout(timer);
     }
   }
-  return { provider: null, hits: [], failures };
+  return { provider: null, hits: [], cached: false, failures };
 }

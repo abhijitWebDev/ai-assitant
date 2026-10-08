@@ -1,4 +1,5 @@
 import type { LangGraphRunnableConfig } from "@langchain/langgraph";
+import { cachedSearch, normalizeQuery } from "../../cache";
 import { config } from "../../config";
 import { threadChunks } from "../../db";
 import { activeApiAdapters } from "../../retrieval/apis";
@@ -31,6 +32,11 @@ export async function sourceProcessor(state: ResearchStateType, cfg: LangGraphRu
   const rawResults: RawResult[] = [];
   const errors: ToolError[] = [];
   const providersUsed = new Map<string, number>();
+  // The log line says "tavily (cached)" for reused results; the evidence keeps the plain provider name.
+  const count = (provider: string, cached: boolean, n: number) => {
+    const label = cached ? `${provider} (cached)` : provider;
+    providersUsed.set(label, (providersUsed.get(label) ?? 0) + n);
+  };
   const at = () => new Date().toISOString();
 
   await Promise.all(
@@ -39,11 +45,11 @@ export async function sourceProcessor(state: ResearchStateType, cfg: LangGraphRu
 
       // 1. Web search with provider fallback chain
       jobs.push(
-        webSearch(q.webQuery).then(({ provider, hits, failures }) => {
+        webSearch(q.webQuery).then(({ provider, hits, cached, failures }) => {
           for (const f of failures)
             errors.push({ node: "source_processor", tool: `web:${f.provider}`, query: q.webQuery, error: f.error, at: at() });
           if (!provider) return;
-          providersUsed.set(provider, (providersUsed.get(provider) ?? 0) + hits.length);
+          count(provider, cached, hits.length);
           for (const h of hits)
             rawResults.push({ subQuestion: q.subQuestion, query: q.webQuery, sourceType: "web", provider, ...h });
         }),
@@ -57,7 +63,7 @@ export async function sourceProcessor(state: ResearchStateType, cfg: LangGraphRu
               if (vectorError)
                 errors.push({ node: "source_processor", tool: "docs:vector", query: q.docQuery, error: `${vectorError} (used keyword search only)`, at: at() });
               const provider = mode === "hybrid" ? "docs (hybrid)" : "docs";
-              providersUsed.set(provider, (providersUsed.get(provider) ?? 0) + hits.length);
+              count(provider, false, hits.length);
               for (const h of hits)
                 rawResults.push({ subQuestion: q.subQuestion, query: q.docQuery, sourceType: "doc", provider, ...h });
             })
@@ -67,12 +73,16 @@ export async function sourceProcessor(state: ResearchStateType, cfg: LangGraphRu
         );
       }
 
-      // 3. External APIs / MCP servers
+      // 3. External APIs / MCP servers (public APIs are cached; an MCP server may not be public)
       for (const adapter of adapters) {
+        const query = () => withTimeout((signal) => adapter.search(q.apiQuery, signal), config.search.timeoutMs);
         jobs.push(
-          withTimeout((signal) => adapter.search(q.apiQuery, signal), config.search.timeoutMs)
-            .then((hits) => {
-              providersUsed.set(adapter.name, (providersUsed.get(adapter.name) ?? 0) + hits.length);
+          (adapter.name === "mcp"
+            ? query().then((value) => ({ value, cached: false }))
+            : cachedSearch("api", [adapter.name, normalizeQuery(q.apiQuery)], query)
+          )
+            .then(({ value: hits, cached }) => {
+              count(adapter.name, cached, hits.length);
               for (const h of hits)
                 rawResults.push({ subQuestion: q.subQuestion, query: q.apiQuery, sourceType: "api", provider: adapter.name, ...h });
             })

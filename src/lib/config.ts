@@ -73,6 +73,12 @@ export const config = {
     researchPerDay: num("RATE_RESEARCH_PER_DAY", 40),
     uploadsPerHour: num("RATE_UPLOADS_PER_HOUR", 30),
   },
+  cache: {
+    /** How long web, Wikipedia and arXiv results are reused (shared by all users). 0 switches it off. */
+    searchTtlHours: num("SEARCH_CACHE_TTL_HOURS", 24),
+    /** Query embeddings kept in memory. 0 switches it off. */
+    embeddingCacheSize: num("EMBEDDING_CACHE_SIZE", 500),
+  },
   vector: {
     /** Self-hosted LanceDB service. Leave LANCEDB_URI unset to use BM25 keyword search only. */
     uri: process.env.LANCEDB_URI || "",

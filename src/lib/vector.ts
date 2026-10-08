@@ -1,4 +1,5 @@
 import type { OpenAIEmbeddings } from "@langchain/openai";
+import { LruCache } from "./cache";
 import { config } from "./config";
 
 /**
@@ -49,6 +50,18 @@ export async function embed(texts: string[]): Promise<number[][]> {
     embedder = new OpenAIEmbeddings({ model: config.vector.embeddingModel, batchSize: 256 });
   }
   return embedder.embedDocuments(texts);
+}
+
+const queryVectors = new LruCache<string, number[]>(config.cache.embeddingCacheSize);
+
+/** One search query's vector; repeats (same text, same model) are served from memory. */
+async function embedQuery(text: string): Promise<number[]> {
+  const key = `${config.vector.embeddingModel}:${text}`;
+  const hit = queryVectors.get(key);
+  if (hit) return hit;
+  const [vector] = await embed([text]);
+  queryVectors.set(key, vector);
+  return vector;
 }
 
 /* ---------------- HTTP client ---------------- */
@@ -130,7 +143,7 @@ export async function indexChunks(rows: ChunkRow[]) {
 }
 
 export async function searchChunks(threadId: string, query: string, limit: number): Promise<Hit<ChunkRow>[]> {
-  const [vector] = await embed([query]);
+  const vector = await embedQuery(query);
   const hits = await search<ChunkRow>(tables.chunks(), vector, limit, `thread_id = ${quoteId(threadId)}`);
   return hits.filter((h) => h._distance <= config.vector.maxDistance);
 }
@@ -141,7 +154,7 @@ export async function indexReport(row: ReportVectorRow) {
 }
 
 export async function searchReports(query: string, limit: number, excludeThreadId?: string): Promise<Hit<ReportVectorRow>[]> {
-  const [vector] = await embed([query]);
+  const vector = await embedQuery(query);
   const filter = excludeThreadId ? `thread_id != ${quoteId(excludeThreadId)}` : undefined;
   const hits = await search<ReportVectorRow>(tables.reports(), vector, limit, filter);
   return hits.filter((h) => h._distance <= config.vector.maxDistance);
