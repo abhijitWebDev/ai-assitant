@@ -102,6 +102,15 @@ export const config = {
     researchPerHour: num("RATE_RESEARCH_PER_HOUR", 10),
     researchPerDay: num("RATE_RESEARCH_PER_DAY", 40),
     uploadsPerHour: num("RATE_UPLOADS_PER_HOUR", 30),
+    voicePerHour: num("RATE_VOICE_PER_HOUR", 60),
+  },
+  voice: {
+    /** Speech to text for the mic button. Groq's Whisper is on its free tier; OpenAI is the fallback. */
+    groqModel: process.env.VOICE_GROQ_MODEL || "whisper-large-v3-turbo",
+    openaiModel: process.env.VOICE_OPENAI_MODEL || "gpt-4o-mini-transcribe",
+    /** The browser stops recording at this length. */
+    maxSeconds: num("VOICE_MAX_SECONDS", 120),
+    maxBytes: 10 * 1024 * 1024,
   },
   cache: {
     /** How long web, Wikipedia and arXiv results are reused (shared by all users). 0 switches it off. */
@@ -141,5 +150,10 @@ export function describeConfig() {
     limits: config.limits,
     tracing: process.env.LANGSMITH_TRACING === "true",
     vector: Boolean(config.vector.uri && config.vector.apiKey),
+    voice: voiceEnabled() ? { maxSeconds: config.voice.maxSeconds } : null,
   };
+}
+
+export function voiceEnabled(): boolean {
+  return Boolean(process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY);
 }

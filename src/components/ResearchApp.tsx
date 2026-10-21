@@ -47,6 +47,7 @@ import {
   useSpotlight,
 } from "@/components/landing-bits";
 import PipelineMap from "./PipelineMap";
+import { VoiceInput } from "./VoiceInput";
 import { cn } from "@/lib/utils";
 import ReportView, { type ReportMeta } from "./ReportView";
 import TraceRail, {
@@ -81,6 +82,7 @@ interface AppConfig {
     smartModel: string;
     fastModel: string;
     vector?: boolean;
+    voice?: { maxSeconds: number } | null;
     limits: { maxResearchIterations: number; maxRevisions: number };
   };
   keys: { llm: boolean; tavily: boolean };
@@ -205,6 +207,7 @@ export default function ResearchApp() {
   const [limited, setLimited] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const questionRef = useRef<HTMLTextAreaElement>(null);
@@ -647,6 +650,19 @@ export default function ResearchApp() {
             disabled={uploading || running}
           />
         </label>
+        {cfg?.config.voice && (
+          <VoiceInput
+            disabled={running}
+            maxSeconds={cfg.config.voice.maxSeconds}
+            beforeStart={requireSignIn}
+            onError={setVoiceError}
+            onText={(text) => {
+              // Spoken text is added to whatever is typed, so it can be edited before starting.
+              setQuestion((q) => (q.trim() ? `${q.trimEnd()} ${text}` : text));
+              questionRef.current?.focus();
+            }}
+          />
+        )}
         <span className="hidden text-xs text-muted-foreground lg:inline">
           PDF, DOCX, TXT or Markdown
         </span>
@@ -679,6 +695,11 @@ export default function ResearchApp() {
       {uploadError && (
         <p className="px-3 pt-2 text-xs text-red-700 dark:text-red-400">
           {uploadError}
+        </p>
+      )}
+      {voiceError && (
+        <p role="alert" className="px-3 pt-2 text-xs text-red-700 dark:text-red-400">
+          {voiceError}
         </p>
       )}
       {limited && (

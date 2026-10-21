@@ -8,7 +8,7 @@ import { getDb } from "./db";
  * and better-sqlite3 is synchronous, so check-and-record cannot race.
  */
 
-export type Action = "research" | "upload";
+export type Action = "research" | "upload" | "voice";
 
 interface Rule {
   max: number;
@@ -34,13 +34,21 @@ function rules(action: Action): Rule[] {
             label: "research runs per day",
           },
         ]
-      : [
-          {
-            max: r.uploadsPerHour,
-            windowMs: HOUR,
-            label: "document uploads per hour",
-          },
-        ];
+      : action === "upload"
+        ? [
+            {
+              max: r.uploadsPerHour,
+              windowMs: HOUR,
+              label: "document uploads per hour",
+            },
+          ]
+        : [
+            {
+              max: r.voicePerHour,
+              windowMs: HOUR,
+              label: "voice inputs per hour",
+            },
+          ];
   // 0 or less switches a rule off.
   return all.filter((rule) => rule.max > 0);
 }
