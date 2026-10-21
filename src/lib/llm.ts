@@ -151,6 +151,15 @@ function isAbort(err: unknown) {
   return err instanceof Error && (err.name === "AbortError" || /aborted/i.test(err.message));
 }
 
+/**
+ * Models only know the year their training data ends, so without this a request like
+ * "the last 5 years" is read as ending in that year. Every agent gets today's date.
+ */
+export function withToday(system: string, now = new Date()): string {
+  const today = now.toISOString().slice(0, 10);
+  return `Today's date is ${today}. The current year is ${now.getUTCFullYear()}. Read relative time ranges ("the last 5 years", "recent", "this year") against this date, not against your training data.\n\n${system}`;
+}
+
 /** Builds a smaller user prompt of at most `maxChars` characters, for the fallback's limits. */
 export type FitPrompt = (maxChars: number) => string;
 
@@ -237,6 +246,7 @@ export async function callStructured<T extends z.ZodTypeAny>(opts: {
   /** Optional smaller prompt for the fallback model's per-minute limit. */
   fit?: FitPrompt;
 }): Promise<z.infer<T>> {
+  opts = { ...opts, system: withToday(opts.system) };
   const testResponder = g.__researchTestResponder;
   if (testResponder) {
     return opts.schema.parse(
@@ -268,6 +278,7 @@ export async function callText(opts: {
   /** Optional smaller prompt for the fallback model's per-minute limit. */
   fit?: FitPrompt;
 }): Promise<string> {
+  opts = { ...opts, system: withToday(opts.system) };
   const testResponder = g.__researchTestResponder;
   if (testResponder) {
     return String(
