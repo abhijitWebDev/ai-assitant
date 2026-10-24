@@ -185,6 +185,10 @@ export default function ResearchApp() {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [lastRunReport, setLastRunReport] = useState<string | null>(null);
+  // A question asked by voice gets its answer read aloud once the report is ready.
+  const [askedByVoice, setAskedByVoice] = useState(false);
+  const voicedRun = useRef(false);
+  const [speakReport, setSpeakReport] = useState<string | null>(null);
   const [cfg, setCfg] = useState<AppConfig | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [scrolled, setScrolled] = useState(false);
@@ -292,6 +296,7 @@ export default function ResearchApp() {
     setDocs([]);
     setSelected(null);
     setQuestion("");
+    setAskedByVoice(false);
     setDrawer(false);
     resetRun();
   };
@@ -315,6 +320,8 @@ export default function ResearchApp() {
     resetRun();
     setQuestion(text);
     setSelected(null);
+    voicedRun.current = askedByVoice;
+    setAskedByVoice(false);
     setRunning(true);
     setStatus("Screening the question…");
     setStations((s) => ({
@@ -416,6 +423,7 @@ export default function ResearchApp() {
     } else if (ev.type === "done") {
       setStatus(`Report ready in ${Math.round(ev.durationMs / 1000)} seconds.`);
       setLastRunReport(ev.reportId);
+      if (voicedRun.current) setSpeakReport(ev.reportId);
       loadThread(threadId).then(() => setSelected(ev.reportId));
     } else if (ev.type === "error") {
       setError(ev.message);
@@ -659,6 +667,7 @@ export default function ResearchApp() {
             onText={(text) => {
               // Spoken text is added to whatever is typed, so it can be edited before starting.
               setQuestion((q) => (q.trim() ? `${q.trimEnd()} ${text}` : text));
+              setAskedByVoice(true);
               questionRef.current?.focus();
             }}
           />
@@ -1041,6 +1050,7 @@ export default function ResearchApp() {
                   log={current.id === lastRunReport ? log : []}
                   errors={current.meta.errors ?? []}
                   meta={current.meta}
+                  autoPlay={current.id === speakReport}
                 />
               ) : draft ? (
                 <ReportView

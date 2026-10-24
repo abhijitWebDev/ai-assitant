@@ -8,6 +8,7 @@ import type { EvidenceChunk, LogEntry, ToolError } from "@/lib/agent/types";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/chip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ReadAloud } from "./ReadAloud";
 import { cn } from "@/lib/utils";
 
 /** Turn [n] citations in the body into links to the matching source entry. */
@@ -71,6 +72,7 @@ export default function ReportView({
   errors,
   meta,
   live,
+  autoPlay,
 }: {
   report: string;
   evidence: EvidenceChunk[];
@@ -78,6 +80,8 @@ export default function ReportView({
   errors: ToolError[];
   meta: ReportMeta;
   live?: boolean;
+  /** Start reading the summary aloud as soon as the report shows. */
+  autoPlay?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
   const md = useMemo(() => linkCitations(report), [report]);
@@ -119,7 +123,8 @@ export default function ReportView({
           </TabsTrigger>
         </TabsList>
         {!live && report && (
-          <div className="flex gap-1 pb-1.5">
+          <div className="flex flex-wrap items-center gap-1 pb-1.5">
+            <ReadAloud report={report} autoPlay={autoPlay} />
             <Button variant="ghost" size="sm" onClick={copy} aria-label="Copy Markdown">
               {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
               {copied ? "Copied" : "Copy"}
