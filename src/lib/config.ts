@@ -104,6 +104,17 @@ export const config = {
     uploadsPerHour: num("RATE_UPLOADS_PER_HOUR", 30),
     voicePerHour: num("RATE_VOICE_PER_HOUR", 60),
   },
+  jev: {
+    /** TypeSafe's Jev decision model. Unset key = every agent uses its LLM as before. */
+    apiKey: process.env.JEV_API_KEY || process.env.TYPESAFE_API_KEY || "",
+    model: process.env.JEV_MODEL || "jev-latest",
+    timeoutMs: num("JEV_TIMEOUT_MS", 8000),
+    /** Guardrail: Jev may accept a question on its own at this confidence or above. */
+    acceptConfidence: num("JEV_ACCEPT_CONFIDENCE", 0.85),
+    /** Extractor: results Jev scores below this (0-4 scale) with enough confidence skip the LLM. */
+    dropBelowScore: num("JEV_DROP_BELOW_SCORE", 1),
+    dropConfidence: num("JEV_DROP_CONFIDENCE", 0.7),
+  },
   voice: {
     /** Speech to text for the mic button. Groq's Whisper is on its free tier; OpenAI is the fallback. */
     groqModel: process.env.VOICE_GROQ_MODEL || "whisper-large-v3-turbo",
@@ -150,6 +161,7 @@ export function describeConfig() {
     limits: config.limits,
     tracing: process.env.LANGSMITH_TRACING === "true",
     vector: Boolean(config.vector.uri && config.vector.apiKey),
+    jev: Boolean(config.jev.apiKey),
     voice: voiceEnabled() ? { maxSeconds: config.voice.maxSeconds } : null,
   };
 }
